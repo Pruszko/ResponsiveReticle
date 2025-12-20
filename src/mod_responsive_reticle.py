@@ -6,7 +6,7 @@ import constants
 from Avatar import PlayerAvatar
 from AvatarInputHandler.gun_marker_ctrl import _GunMarkerController
 from VehicleGunRotator import VehicleGunRotator
-
+from items.vehicles import VehicleDescriptor
 
 log = logging.getLogger(__name__)
 
@@ -55,8 +55,14 @@ def shouldBoostTickRate():
 
     # we don't want to change SPGs gun tick rate because it breaks top-down view reticle dots
     # and this mod is not useful for SPGs, so it's not an issue
-    vehTypeDesc = veh.typeDescriptor.type
-    if 'SPG' in vehTypeDesc.tags:
+    vehicleDescriptor = veh.typeDescriptor  # type: VehicleDescriptor
+    if 'SPG' in vehicleDescriptor.type.tags:
+        return False
+
+    # we don't want to change gun tick rate for vehicles that have static gun yaw (for example Strv 103B)
+    # because it already has hull-controlled reticle movement
+    # and because reticle blinks horribly due to 0/0 gun angles
+    if vehicleDescriptor.gun.staticTurretYaw == 0:
         return False
 
     if player.gunRotator is None:
