@@ -7,18 +7,30 @@ import BigWorld
 import constants
 from Avatar import PlayerAvatar
 from AvatarInputHandler.gun_marker_ctrl import _GunMarkerController
-from GUI import WGGunMarkerDataProvider
 from VehicleGunRotator import VehicleGunRotator
 from gun_rotation_shared import calcPitchLimitsFromDesc
 from items.vehicles import VehicleDescriptor
 from projectile_trajectory import getShotAngles
+from realm import CURRENT_REALM
+
 
 log = logging.getLogger(__name__)
 
 
-def overrideIn(cls):
+def isClientLesta():
+    return CURRENT_REALM == 'RU'
+
+
+def isClientWG():
+    return not isClientLesta()
+
+
+def overrideIn(cls, condition=lambda: True):
 
     def _overrideMethod(func):
+        if not condition():
+            return func
+
         funcName = func.__name__
 
         if funcName.startswith("__") and funcName != "__init__":
@@ -128,7 +140,10 @@ def _updateMatrixProvider(func, self, positionMatrix, relaxTime=0.0):
 # which we would do by introducing cache for 0.1 second
 # that return last computed values (and calls that method only when computing it)
 # and do it in clever way to simulate slower tick-rate
-@overrideIn(VehicleGunRotator)
+#
+# also WG and Lesta specific
+# slightly different method body
+@overrideIn(VehicleGunRotator, condition=isClientWG)
 def __rotate(func, self, shotPoint, timeDiff):
     self._VehicleGunRotator__turretRotationSpeed = 0.0
     targetPoint = shotPoint if shotPoint is not None else self._VehicleGunRotator__prevSentShotPoint
@@ -162,6 +177,52 @@ def __rotate(func, self, shotPoint, timeDiff):
             self.estimatedTurretRotationTime = 0
         gunPitchLimits = calcPitchLimitsFromDesc(turretYaw, self._VehicleGunRotator__getGunPitchLimits(),
                                                  descr.hull.turretPitches[0], descr.turret.gunJointPitch)
+        self._VehicleGunRotator__gunPitch = self.getNextGunPitch(self._VehicleGunRotator__gunPitch, shotGunPitch, timeDiff, gunPitchLimits)
+        if replayCtrl.isPlaying and replayCtrl.isUpdateGunOnTimeWarp:
+            self._VehicleGunRotator__updateTurretMatrix(turretYaw, 0.0)
+            self._VehicleGunRotator__updateGunMatrix(self._VehicleGunRotator__gunPitch, 0.0)
+        else:
+            self._VehicleGunRotator__updateTurretMatrix(turretYaw, self._VehicleGunRotator__ROTATION_TICK_LENGTH)
+            self._VehicleGunRotator__updateGunMatrix(self._VehicleGunRotator__gunPitch, self._VehicleGunRotator__ROTATION_TICK_LENGTH)
+        diff = abs(estimatedTurretYaw - prevTurretYaw)
+        if diff > pi:
+            diff = 2 * pi - diff
+        self._VehicleGunRotator__turretRotationSpeed = diff / timeDiff
+
+        if shouldBoostTickRate():
+            self._VehicleGunRotator__dispersionAngles = getOwnVehicleShotDispersionAngleForGunRotator(self, self._VehicleGunRotator__turretRotationSpeed)
+        else:
+            self._VehicleGunRotator__dispersionAngles = avatar.getOwnVehicleShotDispersionAngle(self._VehicleGunRotator__turretRotationSpeed)
+
+
+@overrideIn(VehicleGunRotator, condition=isClientLesta)
+def __rotate(func, self, shotPoint, timeDiff):
+    self._VehicleGunRotator__turretRotationSpeed = 0.0
+    targetPoint = shotPoint if shotPoint is not None else self._VehicleGunRotator__prevSentShotPoint
+    replayCtrl = BattleReplay.g_replayCtrl
+    if targetPoint is None or self._VehicleGunRotator__isLocked and not replayCtrl.isUpdateGunOnTimeWarp:
+        if shouldBoostTickRate():
+            self._VehicleGunRotator__dispersionAngles = getOwnVehicleShotDispersionAngleForGunRotator(self, 0.0)
+        else:
+            self._VehicleGunRotator__dispersionAngles = self._avatar.getOwnVehicleShotDispersionAngle(0.0)
+    else:
+        avatar = self._avatar
+        descr = avatar.getVehicleDescriptor()
+        turretYawLimits = self._VehicleGunRotator__getTurretYawLimits()
+        maxTurretRotationSpeed = self._VehicleGunRotator__maxTurretRotationSpeed
+        prevTurretYaw = self._VehicleGunRotator__turretYaw
+        vehicleMatrix = self.getAvatarOwnVehicleStabilisedMatrix()
+        shotTurretYaw, shotGunPitch = getShotAngles(descr, vehicleMatrix, (
+            prevTurretYaw, self._VehicleGunRotator__gunPitch), targetPoint, overrideGunPosition=self._VehicleGunRotator__gunPosition)
+        estimatedTurretYaw = self.getNextTurretYaw(prevTurretYaw, shotTurretYaw, maxTurretRotationSpeed * timeDiff,
+                                                   turretYawLimits)
+        self._VehicleGunRotator__turretYaw = turretYaw = self._VehicleGunRotator__syncWithServerTurretYaw(estimatedTurretYaw)
+        if maxTurretRotationSpeed != 0:
+            self.estimatedTurretRotationTime = abs(turretYaw - shotTurretYaw) / maxTurretRotationSpeed
+        else:
+            self.estimatedTurretRotationTime = 0
+        gunPitchLimits = calcPitchLimitsFromDesc(turretYaw, self._VehicleGunRotator__getGunPitchLimits(), descr.hull.turretPitches[0],
+                                                 descr.turret.gunJointPitch)
         self._VehicleGunRotator__gunPitch = self.getNextGunPitch(self._VehicleGunRotator__gunPitch, shotGunPitch, timeDiff, gunPitchLimits)
         if replayCtrl.isPlaying and replayCtrl.isUpdateGunOnTimeWarp:
             self._VehicleGunRotator__updateTurretMatrix(turretYaw, 0.0)
@@ -231,36 +292,79 @@ def getOwnVehicleShotDispersionAngleForGunRotator(gunRotator, turretRotationSpee
 # the best place to handle reticle size interpolation would be in _DefaultGunMarkerController
 # however - that class is very commonly either overridden or replaced completely by server-reticle related mods
 # so the next good place to do that is at the data provider directly
+#
+# Lesta specific
+# different gun marker data provider class name and method name
 
-@overrideIn(WGGunMarkerDataProvider)
-def updateSizes(func, self, currentSize, currentSizeOffset, relaxTime, offsetInertness):
-    # second check makes sure, we alter data provider only for client-side data provider - not the server one
-    if not shouldBoostTickRate() or relaxTime != VehicleGunRotator._VehicleGunRotator__ROTATION_TICK_LENGTH:
-        func(self, currentSize, currentSizeOffset, relaxTime, offsetInertness)
-        return
+if isClientWG():
+    from GUI import WGGunMarkerDataProvider
 
-    # we cannot add attributes to data provider, because it is python binding object that doesn't have it enabled :(
-    # so we must track method calls somewhere outside
-    # and I want it to be cleared somewhere automatically without doing overrides
-    # so let's just store it in player object and call it a day
-    player = BigWorld.player()
+    @overrideIn(WGGunMarkerDataProvider)
+    def updateSizes(func, self, currentSize, currentSizeOffset, relaxTime, offsetInertness):
+        # second check makes sure, we alter data provider only for client-side data provider - not the server one
+        if not shouldBoostTickRate() or relaxTime != VehicleGunRotator._VehicleGunRotator__ROTATION_TICK_LENGTH:
+            func(self, currentSize, currentSizeOffset, relaxTime, offsetInertness)
+            return
 
-    dataProviderSizeCache = getattr(player, "_mod_dataProviderSizeCache", None)  # type: dict
-    if dataProviderSizeCache is None:
-        dataProviderSizeCache = {}
-        player._mod_dataProviderSizeCache = dataProviderSizeCache
+        # we cannot add attributes to data provider, because it is python binding object that doesn't have it enabled :(
+        # so we must track method calls somewhere outside
+        # and I want it to be cleared somewhere automatically without doing overrides
+        # so let's just store it in player object and call it a day
+        player = BigWorld.player()
 
-    selfId = id(self)
-    lastTime = dataProviderSizeCache.get(selfId, None)
-    if lastTime is None:
+        dataProviderSizeCache = getattr(player, "_mod_dataProviderSizeCache", None)  # type: dict
+        if dataProviderSizeCache is None:
+            dataProviderSizeCache = {}
+            player._mod_dataProviderSizeCache = dataProviderSizeCache
+
+        selfId = id(self)
+        lastTime = dataProviderSizeCache.get(selfId, None)
+        if lastTime is None:
+            dataProviderSizeCache[selfId] = BigWorld.time()
+            func(self, currentSize, currentSizeOffset, constants.SERVER_TICK_LENGTH, offsetInertness)
+            return
+
+        # ignore fast consecutive size updates in data provider
+        timeDiff = BigWorld.time() - lastTime
+        if timeDiff < constants.SERVER_TICK_LENGTH:
+            return
+
         dataProviderSizeCache[selfId] = BigWorld.time()
         func(self, currentSize, currentSizeOffset, constants.SERVER_TICK_LENGTH, offsetInertness)
-        return
 
-    # ignore fast consecutive size updates in data provider
-    timeDiff = BigWorld.time() - lastTime
-    if timeDiff < constants.SERVER_TICK_LENGTH:
-        return
 
-    dataProviderSizeCache[selfId] = BigWorld.time()
-    func(self, currentSize, currentSizeOffset, constants.SERVER_TICK_LENGTH, offsetInertness)
+else:
+    from GUI import GunMarkerDataProvider
+
+    @overrideIn(GunMarkerDataProvider)
+    def updateSize(func, self, currentSize, relaxTime):
+        # second check makes sure, we alter data provider only for client-side data provider - not the server one
+        if not shouldBoostTickRate() or relaxTime != VehicleGunRotator._VehicleGunRotator__ROTATION_TICK_LENGTH:
+            func(self, currentSize, relaxTime)
+            return
+
+        # we cannot add attributes to data provider, because it is python binding object that doesn't have it enabled :(
+        # so we must track method calls somewhere outside
+        # and I want it to be cleared somewhere automatically without doing overrides
+        # so let's just store it in player object and call it a day
+        player = BigWorld.player()
+
+        dataProviderSizeCache = getattr(player, "_mod_dataProviderSizeCache", None)  # type: dict
+        if dataProviderSizeCache is None:
+            dataProviderSizeCache = {}
+            player._mod_dataProviderSizeCache = dataProviderSizeCache
+
+        selfId = id(self)
+        lastTime = dataProviderSizeCache.get(selfId, None)
+        if lastTime is None:
+            dataProviderSizeCache[selfId] = BigWorld.time()
+            func(self, currentSize, constants.SERVER_TICK_LENGTH)
+            return
+
+        # ignore fast consecutive size updates in data provider
+        timeDiff = BigWorld.time() - lastTime
+        if timeDiff < constants.SERVER_TICK_LENGTH:
+            return
+
+        dataProviderSizeCache[selfId] = BigWorld.time()
+        func(self, currentSize, constants.SERVER_TICK_LENGTH)
