@@ -5,7 +5,7 @@ several dozen times.
 Basically reducing client reticle input lag movement <ins>**from 100 ms (???)
 to 1 ms**</ins>.
 
-![Mod logo](images/logo.jpg)
+![Mod preview](images/preview.png)
 
 ## Notes
 * disabled for SPG because ... it's complicated
