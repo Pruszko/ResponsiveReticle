@@ -1,9 +1,9 @@
 from Avatar import PlayerAvatar
 from avatar_components.AvatarObserver import AvatarObserver
 
-from responsive_reticle.helpers.one_tick_cache import g_oneTickCache, old_observer_getVehicleAttached, \
+from responsive_reticle.helpers.one_tick_cache import g_oneTickCache, old_getVehicleAttached, \
     old_avatar_getVehicleDescriptor, old_avatar_getOwnVehicleStabilisedMatrix
-from responsive_reticle.utils import overrideIn
+from responsive_reticle.utils import overrideIn, isClientWG, isClientLesta
 
 
 # performance note
@@ -16,12 +16,24 @@ from responsive_reticle.utils import overrideIn
 # * on VGR AT and AE tick: cumulative time is 7.5 us (loading call) + 0.5 us (2 calls) = 8 us
 #
 # so this saves (13 us; 20 us) on average
-@overrideIn(AvatarObserver)
+#
+# also WG and Lesta specific
+# different method location
+
+@overrideIn(PlayerAvatar, condition=isClientWG)
 def getVehicleAttached(self):
     if not g_oneTickCache.isDuringVgrTick:
-        return old_observer_getVehicleAttached(self)
+        return old_getVehicleAttached(self)
 
-    return g_oneTickCache.observer_vehicleAttached
+    return g_oneTickCache.avatar_vehicleAttached
+
+
+@overrideIn(AvatarObserver, condition=isClientLesta)
+def getVehicleAttached(self):
+    if not g_oneTickCache.isDuringVgrTick:
+        return old_getVehicleAttached(self)
+
+    return g_oneTickCache.avatar_vehicleAttached
 
 
 # performance note

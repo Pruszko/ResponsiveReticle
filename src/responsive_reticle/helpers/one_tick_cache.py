@@ -8,6 +8,7 @@ from VehicleGunRotator import VehicleGunRotator
 from avatar_components.AvatarObserver import AvatarObserver
 from items.vehicles import VehicleDescriptor
 
+from responsive_reticle.utils import isClientWG
 
 # we're putting old methods here instead of near hooks
 # because we have circular dependency between hooks and this cache,
@@ -16,7 +17,7 @@ from items.vehicles import VehicleDescriptor
 # because those takes on average extra 10 us from VGR tick
 #
 # and vice versa for our hooks as well
-old_observer_getVehicleAttached = AvatarObserver.getVehicleAttached
+old_getVehicleAttached = PlayerAvatar.getVehicleAttached if isClientWG() else AvatarObserver.getVehicleAttached
 old_avatar_getVehicleDescriptor = PlayerAvatar.getVehicleDescriptor
 old_avatar_getOwnVehicleStabilisedMatrix = PlayerAvatar.getOwnVehicleStabilisedMatrix
 old_VGR_getAvatarOwnVehicleStabilisedMatrix = VehicleGunRotator.getAvatarOwnVehicleStabilisedMatrix
@@ -53,7 +54,7 @@ class OneTickCache(object):
         # we want them to be kept as properties instead of methods, because this is fast
         self.gunRotator_avatarOwnVehicleStabilisedMatrix = Math.Matrix()
         self.avatar_ownVehicleStabilisedMatrix = Math.Matrix()
-        self.observer_vehicleAttached = None  # type: Optional[Vehicle]
+        self.avatar_vehicleAttached = None  # type: Optional[Vehicle]
         self.avatar_vehicleDescriptor = None  # type: Optional[VehicleDescriptor]
 
     def updateCache(self):
@@ -61,7 +62,7 @@ class OneTickCache(object):
 
         # by calling them in this order, every next cache value loading uses previous one
         # nice!
-        self.observer_vehicleAttached = old_observer_getVehicleAttached(player)
+        self.avatar_vehicleAttached = old_getVehicleAttached(player)
         self.avatar_vehicleDescriptor = old_avatar_getVehicleDescriptor(player)
         self.avatar_ownVehicleStabilisedMatrix = old_avatar_getOwnVehicleStabilisedMatrix(player)
         self.gunRotator_avatarOwnVehicleStabilisedMatrix = getAvatarOwnVehicleStabilisedMatrix(player)
