@@ -7,6 +7,7 @@ import Math
 import constants
 from Avatar import PlayerAvatar
 from AvatarInputHandler import AimingSystems
+from AvatarInputHandler.control_modes import _GunControlMode
 from VehicleGunRotator import VehicleGunRotator
 from aih_constants import GUN_MARKER_TYPE
 from gun_rotation_shared import calcPitchLimitsFromDesc, calcGunPitchCorrection
@@ -518,6 +519,17 @@ def __updateGunMarker(self, forceRelaxTime=None):
     # remember to update dual accuracy as well
     if vehicle and vehicle.typeDescriptor and vehicle.typeDescriptor.hasDualAccuracy:
         gunMarker.setPosition(position, GUN_MARKER_TYPE.DUAL_ACC)
+
+
+old_setAimingMode = _GunControlMode.setAimingMode
+
+
+@overrideIn(_GunControlMode)
+def setAimingMode(self, enable, mode):
+    if mode == constants.AIMING_MODE.SHOOTING:
+        return
+
+    old_setAimingMode(self, enable, mode)
 
 
 # performance note
